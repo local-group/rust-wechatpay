@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["Qian Linfeng <thewawar@gmail.com>"]
 
 [dependencies]
+time = "0.1"
+uuid = {version="0.2", features=["v4"]}
+hyper = "0.9.10"
