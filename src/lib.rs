@@ -24,11 +24,12 @@ pub const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orde
 
 
 /// [交易类型]
-///
-/// APP--app支付，统一下单接口trade_type的传参可参考这里
 pub enum TradeType {
+    /// `JSAPI`
     Jsapi,
+    /// `NATIVE`
     Native,
+    /// `APP` : app支付，统一下单接口trade_type的传参可参考这里
     App
 }
 
@@ -92,6 +93,9 @@ pub fn get_order_no() -> String {
     get_time_str() + &((&get_nonce_str())[..18])
 }
 
+/// 签名算法 (给请求参数签名)
+///
+/// 详见: 接口规则 > 安全规范
 pub fn sign(pairs: &HashMap<String, String>) -> String {
     // 如果参数的值为空不参与签名；
     let mut keys = pairs
@@ -121,7 +125,7 @@ pub fn sign(pairs: &HashMap<String, String>) -> String {
     digest
 }
 
-
+/// 将`xml`数据解析成`HashMap`
 pub fn from_xml_str(data: &str) -> HashMap<String, String> {
     let mut pairs = HashMap::new();
 
@@ -145,6 +149,7 @@ pub fn from_xml_str(data: &str) -> HashMap<String, String> {
     pairs
 }
 
+/// 使用`HashMap`生成`xml`数据
 pub fn to_xml_str(pairs: &HashMap<String, String>) -> String {
     let mut target: Vec<u8> = Vec::new();
     {
