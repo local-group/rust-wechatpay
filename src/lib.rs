@@ -1,19 +1,25 @@
 
 extern crate time;
 extern crate uuid;
+extern crate url;
+extern crate md5;
+extern crate xml;
+
 
 use std::string::ToString;
 use std::collections::HashMap;
 
+use url::form_urlencoded;
+use xml::writer::{events};
 use time::{strftime};
 use uuid::Uuid;
 
 
 /// 货币种类: 人民币
 pub const CURRENCY_CNY: &'static str = "CNY";
-/// 统一下单
+/// 统一下单 URL
 pub const UNIFIEDORDER_URL: &'static str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
-/// 查询订单
+/// 查询订单 URL
 pub const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
 
 
@@ -80,20 +86,197 @@ pub fn get_order_no() -> String {
     get_time_str() + &((&get_nonce_str())[..18])
 }
 
-pub fn sign(pairs: HashMap<String, String>) -> String {
-    "".to_string()
+pub fn sign(pairs: &HashMap<String, String>, sign_key: &str) -> String {
+    // 如果参数的值为空不参与签名；
+    let mut keys = pairs
+        .iter()
+        .filter(|pair| {pair.1.len() > (0 as usize)})
+        .map(|pair| {pair.0.to_string()})
+        .collect::<Vec<String>>();
+
+    // 参数名ASCII码从小到大排序（字典序）；
+    keys.sort();
+    let mut encoder = form_urlencoded::Serializer::new(String::new());
+    for key in keys {
+        encoder.append_pair(&key, &pairs[&key]);
+    }
+    encoder.append_pair("key", sign_key);
+    let encoded = encoder.finish();
+
+    // 生成 MD5 字符串
+    let mut context = md5::Context::new();
+    context.consume(encoded.as_bytes());
+    let mut digest = String::with_capacity(32);
+    for x in &context.compute()[..] {
+        digest.push_str(&format!("{:02X}", x));
+    }
+    digest
+}
+
+
+pub fn from_xml_str(data: &str) -> HashMap<String, String> {
+    let mut pairs = HashMap::new();
+
+    let reader = xml::reader::EventReader::from_str(data);
+    let mut tag: String = "".to_string();
+    for event in reader {
+        match event {
+            Ok(xml::reader::XmlEvent::StartElement{name, ..}) => {
+                tag = name.local_name;
+            }
+            Ok(xml::reader::XmlEvent::CData(value)) => {
+                pairs.insert(tag.clone(), value);
+            }
+            Err(e) => {
+                println!("Parse xml error: {:?}", e);
+                break;
+            }
+            _ => {}
+        }
+    }
+    pairs
+}
+
+pub fn to_xml_str(pairs: &HashMap<String, String>) -> String {
+    let mut target: Vec<u8> = Vec::new();
+    {
+        let mut writer = xml::writer::EmitterConfig::new()
+            .write_document_declaration(false)
+            .create_writer(&mut target);
+        let _ = writer.write::<events::XmlEvent>(events::XmlEvent::start_element("xml").into());
+        for (key, value) in pairs{
+            let _ = writer.write::<events::XmlEvent>(events::XmlEvent::start_element(key.as_ref()).into());
+            let _ = writer.write::<events::XmlEvent>(events::XmlEvent::characters(value.as_ref()).into());
+            let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
+        }
+        let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
+    }
+    String::from_utf8(target).unwrap()
 }
 
 
 #[cfg(test)]
 mod tests {
     extern crate time;
-    use super::*;
+    extern crate xml;
+
+    use std::collections::HashMap;
+
+    use xml::reader::{EventReader, XmlEvent};
 
     #[test]
-    fn it_works() {
-        assert_eq!(get_time_str().len(), 14);
-        assert_eq!(get_nonce_str().len(), 32);
-        assert_eq!(get_order_no().len(), 32);
+    fn test_from_xml_str() {
+        let source = r#"
+<xml>
+   <return_code><![CDATA[SUCCESS]]></return_code>
+   <return_msg><![CDATA[OK]]></return_msg>
+   <appid><![CDATA[wx2421b1c4370ec43b]]></appid>
+   <mch_id><![CDATA[10000100]]></mch_id>
+   <device_info><![CDATA[1000]]></device_info>
+   <nonce_str><![CDATA[TN55wO9Pba5yENl8]]></nonce_str>
+   <sign><![CDATA[BDF0099C15FF7BC6B1585FBB110AB635]]></sign>
+   <result_code><![CDATA[SUCCESS]]></result_code>
+   <openid><![CDATA[oUpF8uN95-Ptaags6E_roPHg7AG0]]></openid>
+   <is_subscribe><![CDATA[Y]]></is_subscribe>
+   <trade_type><![CDATA[APP]]></trade_type>
+   <bank_type><![CDATA[CCB_DEBIT]]></bank_type>
+   <total_fee>1</total_fee>
+   <fee_type><![CDATA[CNY]]></fee_type>
+   <transaction_id><![CDATA[1008450740201411110005820873]]></transaction_id>
+   <out_trade_no><![CDATA[1415757673]]></out_trade_no>
+   <attach><![CDATA[订单额外描述]]></attach>
+   <time_end><![CDATA[20141111170043]]></time_end>
+   <trade_state><![CDATA[SUCCESS]]></trade_state>
+</xml>
+"#;
+        let pairs = ::from_xml_str(source);
+        for &(k, v) in [
+            ("return_code"    , "SUCCESS"),
+            ("return_msg"     , "OK"),
+            ("appid"          , "wx2421b1c4370ec43b"),
+            ("mch_id"         , "10000100"),
+            ("result_code"    , "SUCCESS"),
+            ("attach"         , "订单额外描述"),
+            ("transaction_id" , "1008450740201411110005820873"),
+            ("time_end"       , "20141111170043"),
+            ("trade_type"     , "APP")
+        ].iter() {
+            assert_eq!(pairs.get(k), Some(&v.to_string()));
+        }
+    }
+
+    fn check_xml_str(pairs: &HashMap<String, String>, data: &str) {
+        let reader = EventReader::from_str(data);
+        let mut tag: String = "".to_string();
+        for event in reader {
+            match event {
+                Ok(XmlEvent::StartElement{name, ..}) => {
+                    tag = name.local_name;
+                }
+                Ok(XmlEvent::Characters(s)) => {
+                    assert_eq!(Some(&s), pairs.get(&tag));
+                }
+                Err(e) => {
+                    panic!(format!("Parse error: {:?}", e));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_xml_str() {
+        let output = r#"
+<xml>
+   <appid>wx2421b1c4370ec43b</appid>
+   <attach>支付测试</attach>
+   <body>APP支付测试</body>
+   <mch_id>10000100</mch_id>
+   <nonce_str>1add1a30ac87aa2db72f57a2375d8fec</nonce_str>
+   <notify_url>http://wxpay.weixin.qq.com/pub_v2/pay/notify.v2.php</notify_url>
+   <out_trade_no>1415659990</out_trade_no>
+   <spbill_create_ip>14.23.150.211</spbill_create_ip>
+   <total_fee>1</total_fee>
+   <trade_type>APP</trade_type>
+   <sign>0CB01533B8C1EF103065174F50BCA001</sign>
+</xml>
+"#;
+        let mut pairs = HashMap::new();
+        for &(k, v) in [
+            ("appid"            , "wx2421b1c4370ec43b"),
+            ("attach"           , "支付测试"),
+            ("body"             , "APP支付测试"),
+            ("mch_id"           , "10000100"),
+            ("nonce_str"        , "1add1a30ac87aa2db72f57a2375d8fec"),
+            ("notify_url"       , "http://wxpay.weixin.qq.com/pub_v2/pay/notify.v2.php"),
+            ("out_trade_no"     , "1415659990"),
+            ("spbill_create_ip" , "14.23.150.211"),
+            ("total_fee"        , "1"),
+            ("trade_type"       , "APP"),
+            ("sign"             , "0CB01533B8C1EF103065174F50BCA001")
+        ].iter() {
+            pairs.insert(k.to_string(), v.to_string());
+        }
+
+        check_xml_str(&pairs, output);
+        check_xml_str(&pairs, &(::to_xml_str(&pairs)));
+    }
+
+    #[test]
+    fn test_string_length() {
+        assert_eq!(::get_time_str().len(), 14);
+        assert_eq!(::get_nonce_str().len(), 32);
+        assert_eq!(::get_order_no().len(), 32);
+    }
+
+    #[test]
+    fn test_sign() {
+        let mut pairs = HashMap::new();
+        pairs.insert("appid".to_string(), "wxd930ea5d5a258f4f".to_string());
+        pairs.insert("mch_id".to_string(), "10000100".to_string());
+        pairs.insert("device_info".to_string(), "1000".to_string());
+        pairs.insert("body".to_string(), "test".to_string());
+        pairs.insert("nonce_str".to_string(), "ibuaiVcKdpRxkhJA".to_string());
+        assert_eq!(::sign(&pairs, "192006250b4c09247ec02edce69f6a2d"), "9A0A8659F005D6984697E2CA0A9CF3B7");
     }
 }

@@ -1,9 +1,12 @@
 [package]
-name = "lib"
+name = "wechatpay"
 version = "0.1.0"
 authors = ["Qian Linfeng <thewawar@gmail.com>"]
 
 [dependencies]
 time = "0.1"
 uuid = {version="0.2", features=["v4"]}
+xml-rs = "0.3.4"
+url = "1.2.0"
 hyper = "0.9.10"
+md5 = "0.2.0"
