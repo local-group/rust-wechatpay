@@ -86,11 +86,13 @@ pub fn get_order_no() -> String {
     get_time_str() + &((&get_nonce_str())[..18])
 }
 
-pub fn sign(pairs: &HashMap<String, String>, sign_key: &str) -> String {
+pub fn sign(pairs: &HashMap<String, String>) -> String {
     // 如果参数的值为空不参与签名；
     let mut keys = pairs
         .iter()
-        .filter(|pair| {pair.1.len() > (0 as usize)})
+        .filter(|pair| {
+            pair.0.ne("key") && pair.0.ne("sign") && pair.1.len() > (0 as usize)
+        })
         .map(|pair| {pair.0.to_string()})
         .collect::<Vec<String>>();
 
@@ -100,7 +102,7 @@ pub fn sign(pairs: &HashMap<String, String>, sign_key: &str) -> String {
     for key in keys {
         encoder.append_pair(&key, &pairs[&key]);
     }
-    encoder.append_pair("key", sign_key);
+    encoder.append_pair("key", pairs.get("key").unwrap());
     let encoded = encoder.finish();
 
     // 生成 MD5 字符串
@@ -272,11 +274,16 @@ mod tests {
     #[test]
     fn test_sign() {
         let mut pairs = HashMap::new();
-        pairs.insert("appid".to_string(), "wxd930ea5d5a258f4f".to_string());
-        pairs.insert("mch_id".to_string(), "10000100".to_string());
-        pairs.insert("device_info".to_string(), "1000".to_string());
-        pairs.insert("body".to_string(), "test".to_string());
-        pairs.insert("nonce_str".to_string(), "ibuaiVcKdpRxkhJA".to_string());
-        assert_eq!(::sign(&pairs, "192006250b4c09247ec02edce69f6a2d"), "9A0A8659F005D6984697E2CA0A9CF3B7");
+        for &(k, v) in [
+            ("appid"       , "wxd930ea5d5a258f4f"),
+            ("mch_id"      , "10000100"),
+            ("device_info" , "1000"),
+            ("body"        , "test"),
+            ("nonce_str"   , "ibuaiVcKdpRxkhJA"),
+            ("key"         , "192006250b4c09247ec02edce69f6a2d"),
+        ].iter() {
+            pairs.insert(k.to_string(), v.to_string());
+        }
+        assert_eq!(::sign(&pairs), "9A0A8659F005D6984697E2CA0A9CF3B7");
     }
 }
