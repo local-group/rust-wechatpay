@@ -1,5 +1,4 @@
 
-extern crate hyper;
 extern crate curl;
 extern crate time;
 extern crate uuid;

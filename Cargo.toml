@@ -14,5 +14,4 @@ uuid = {version="0.2", features=["v4"]}
 md5 = "0.2.0"
 xml-rs = "0.3.4"
 url = "1.2.0"
-hyper = "0.9.10"
 curl = "0.3.2"
