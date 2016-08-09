@@ -277,6 +277,7 @@ mod tests {
 
     #[test]
     fn test_string_length() {
+        assert_eq!(format!("{}", ::get_timestamp()).len(), 10);
         assert_eq!(::get_time_str().len(), 14);
         assert_eq!(::get_nonce_str().len(), 32);
         assert_eq!(::get_order_no().len(), 32);
