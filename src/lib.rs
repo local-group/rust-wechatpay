@@ -1,4 +1,6 @@
 
+extern crate hyper;
+extern crate curl;
 extern crate time;
 extern crate uuid;
 extern crate url;
@@ -6,9 +8,11 @@ extern crate md5;
 extern crate xml;
 
 
+use std::io::{Read, Write};
 use std::string::ToString;
 use std::collections::BTreeMap;
 
+use curl::easy::Easy;
 use url::form_urlencoded;
 use xml::writer::{events};
 use time::{strftime};
@@ -19,25 +23,17 @@ use uuid::Uuid;
 pub const CURRENCY_CNY: &'static str = "CNY";
 /// 统一下单 URL
 pub const UNIFIEDORDER_URL: &'static str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
+pub const MICROPAY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/micropay";
 /// 查询订单 URL
 pub const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
 
 
-/// [交易类型]
-pub enum TradeType {
-    /// `JSAPI`
-    Jsapi,
-    /// `NATIVE`
-    Native,
-    /// `APP` : app支付，统一下单接口trade_type的传参可参考这里
-    App
-}
-
 impl ToString for TradeType {
     fn to_string(&self) -> String {
         (match *self {
+            TradeType::Micro => "MICRO",
             TradeType::Jsapi => "JSAPI",
-            TradeType::Native => "NATIVE",
+            TradeType::Native | TradeType::Qrcode => "NATIVE",
             TradeType::App => "APP"
         }).to_string()
     }
@@ -45,6 +41,232 @@ impl ToString for TradeType {
 
 /// 银行类型
 pub enum BankType {}
+
+enum ParamsCheckType {
+    Missing,
+    Redundant
+}
+
+/// 错误类
+pub enum WechatpayError {
+    /// 缺少字段
+    MissingField(String),
+    /// 多余的字段
+    RedundantField(String),
+    Curl(curl::Error),
+    Request,
+    Unknown
+}
+
+pub enum OrderIdentifier {
+    TransactionId(String),
+    OutTradeNo(String)
+}
+
+pub type WechatpayResult = Result<BTreeMap<String, String>, WechatpayError>;
+
+
+pub struct WechatpayClient {
+    appid: String,
+    mch_id: String,
+    api_key: String,
+    notify_url: String,
+    cert: String, // unused
+}
+
+impl WechatpayClient {
+    pub fn new(appid: &str, mch_id: &str, api_key: &str, notify_url: &str, cert: &str) -> WechatpayClient {
+        WechatpayClient{
+            appid: appid.to_string(),
+            mch_id: mch_id.to_string(),
+            api_key: api_key.to_string(),
+            notify_url: notify_url.to_string(),
+            cert: cert.to_string()
+        }
+    }
+
+    fn check_params(&self,
+                    params: &BTreeMap<String, String>,
+                    keys: Vec<&str>,
+                    check_type: ParamsCheckType) -> Option<WechatpayError> {
+        for key in keys.iter() {
+            match check_type {
+                ParamsCheckType::Missing => {
+                    if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
+                        return Some(WechatpayError::MissingField(key.to_string()));
+                    }
+                }
+                ParamsCheckType::Redundant => {
+                    if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
+                        return Some(WechatpayError::RedundantField(key.to_string()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn request(&self,
+               url: &str,
+               params: BTreeMap<String, String>,
+               retries: Option<u32>,
+               require_cert: bool) -> WechatpayResult {
+
+        let api_key = self.api_key.to_string();
+        let sign_str = get_sign(&params, &api_key);
+        let mut params = params;
+        params.insert("sign".to_string(), sign_str);
+
+        let xml_str = to_xml_str(&params);
+        let mut handle = Easy::new();
+        let mut err = WechatpayError::Request;
+        let _ = handle.url(url).map_err(|e| {
+            err = WechatpayError::Curl(e);
+        });
+        if require_cert {
+            let _ = handle.ssl_cert(&self.cert).map_err(|e| {
+                err = WechatpayError::Curl(e);
+            });
+        }
+        let _ = handle.read_function(move |buf| {
+            Ok(xml_str.as_bytes().read(buf).unwrap_or(0))
+        }).map_err(|e| {
+            err = WechatpayError::Curl(e);
+        });
+
+        for _ in 0..retries.unwrap_or(1) {
+            let mut data = Vec::<u8>::new();
+            {
+                let mut handle = handle.transfer();
+                let _ = handle.write_function(|text| {
+                    Ok(match data.write_all(text) {
+                        Ok(_) => text.len(),
+                        Err(_) => 0
+                    })
+                }).map_err(|e| {
+                    err = WechatpayError::Curl(e);
+                });
+                let _ = handle.perform().map_err(|e|{
+                    err = WechatpayError::Curl(e);
+                });
+            }
+
+            let status_code = match handle.response_code() {
+                Ok(code) => code,
+                Err(e) => {
+                    err = WechatpayError::Curl(e);
+                    0
+                }
+            };
+            if status_code == 200 || status_code == 201 {
+                let s = String::from_utf8(data).unwrap();
+                return Ok(from_xml_str(s.as_ref()))
+            }
+        }
+        Err(err)
+    }
+
+    // let retries = if retries == 0 { 3 } else { retries };
+    pub fn pay(&self,
+               params: BTreeMap<String, String>,
+               trade_type: TradeType,
+               retries: Option<u32>) -> WechatpayResult {
+        if let Some(e) = self.check_params(&params, vec!["key", "sign"],
+                                           ParamsCheckType::Redundant) {
+            return Err(e);
+        }
+        if let Some(e) = self.check_params(&params,
+                                           vec!["body", "out_trade_no", "total_fee", "spbill_create_ip"],
+                                           ParamsCheckType::Missing) {
+            return Err(e);
+        }
+        match trade_type {
+            TradeType::Native => {
+                if let Some(e) = self.check_params(&params, vec!["product_id"], ParamsCheckType::Missing) {
+                    return Err(e);
+                }
+            }
+            TradeType::Jsapi => {
+                if let Some(e) = self.check_params(&params, vec!["openid"], ParamsCheckType::Missing) {
+                    return Err(e);
+                }
+            }
+            TradeType::Micro => {
+                if let Some(e) = self.check_params(&params, vec!["auth_code"], ParamsCheckType::Missing) {
+                    return Err(e);
+                }
+            }
+            _ => {}
+        }
+
+        let url = if trade_type == TradeType::Micro { UNIFIEDORDER_URL } else { MICROPAY_URL };
+        let body = params.get("body").unwrap_or(&"Test Request".to_string()).to_string();
+        let mut params = params;
+        params.insert("trade_type".to_string(), trade_type.to_string());
+        params.insert("appid".to_string(), self.appid.clone());
+        params.insert("mch_id".to_string(), self.mch_id.clone());
+        params.insert("nonce_str".to_string(), get_nonce_str());
+        params.insert("body".to_string(), body);
+        if trade_type != TradeType::Micro {
+            params.insert("notify_url".to_string(), self.notify_url.clone());
+        }
+        self.request(url, params, retries, false)
+    }
+
+    pub fn micro_pay(&self,
+                   params: BTreeMap<String, String>,
+                   retries: Option<u32>) -> WechatpayResult {
+        self.pay(params, TradeType::Micro, retries)
+    }
+
+    pub fn jsapi_pay(&self,
+                   params: BTreeMap<String, String>,
+                   retries: Option<u32>) -> WechatpayResult {
+        self.pay(params, TradeType::Jsapi, retries)
+    }
+
+    pub fn qrcode_pay(&self,
+                   params: BTreeMap<String, String>,
+                   retries: Option<u32>) -> WechatpayResult {
+        self.pay(params, TradeType::Qrcode, retries)
+    }
+
+    pub fn app_pay(&self,
+                   params: BTreeMap<String, String>,
+                   retries: Option<u32>) -> WechatpayResult {
+        self.pay(params, TradeType::App, retries)
+    }
+
+    pub fn query_order(&self, id: OrderIdentifier) -> WechatpayResult {
+        let mut params = BTreeMap::new();
+        match id {
+            OrderIdentifier::TransactionId(s) => {
+                params.insert("transaction_id".to_string(), s);
+            }
+            OrderIdentifier::OutTradeNo(s) => {
+                params.insert("out_trade_no".to_string(), s);
+            }
+        }
+        params.insert("appid".to_string(), self.appid.clone());
+        params.insert("mch_id".to_string(), self.mch_id.clone());
+        params.insert("nonce_str".to_string(), get_nonce_str());
+
+        self.request(ORDERQUERY_URL, params, None, false)
+    }
+}
+
+/// [交易类型]
+#[derive(PartialEq)]
+pub enum TradeType {
+    /// `MICRO`
+    Micro,
+    /// `JSAPI`
+    Jsapi,
+    /// `NATIVE`
+    Native, Qrcode,
+    /// `APP` : app支付，统一下单接口trade_type的传参可参考这里
+    App
+}
 
 /// [交易金额]
 ///
@@ -96,7 +318,7 @@ pub fn get_order_no() -> String {
 /// 签名算法 (给请求参数签名)
 ///
 /// 详见: 接口规则 > 安全规范
-pub fn sign(pairs: &BTreeMap<String, String>) -> String {
+pub fn get_sign(pairs: &BTreeMap<String, String>, api_key: &String) -> String {
     // 如果参数的值为空不参与签名；
     let keys = pairs
         .iter()
@@ -111,7 +333,8 @@ pub fn sign(pairs: &BTreeMap<String, String>) -> String {
     for key in keys {
         encoder.append_pair(&key, &pairs[&key]);
     }
-    encoder.append_pair("key", pairs.get("key").unwrap());
+
+    encoder.append_pair("key", api_key);
     let encoded = encoder.finish();
 
     // 生成 MD5 字符串
@@ -298,11 +521,11 @@ mod tests {
             ("mch_id"      , "10000100"),
             ("device_info" , "1000"),
             ("body"        , "test"),
-            ("nonce_str"   , "ibuaiVcKdpRxkhJA"),
-            ("key"         , "192006250b4c09247ec02edce69f6a2d"),
+            ("nonce_str"   , "ibuaiVcKdpRxkhJA")
         ].iter() {
             pairs.insert(k.to_string(), v.to_string());
         }
-        assert_eq!(::sign(&pairs), "9A0A8659F005D6984697E2CA0A9CF3B7");
+        let api_key = "192006250b4c09247ec02edce69f6a2d".to_string();
+        assert_eq!(::get_sign(&pairs, &api_key), "9A0A8659F005D6984697E2CA0A9CF3B7");
     }
 }

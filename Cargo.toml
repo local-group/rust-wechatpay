@@ -1,6 +1,6 @@
 [package]
 name = "wechatpay"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Qian Linfeng <thewawar@gmail.com>"]
 license = "MIT"
 description = "Wechat payment server SDK"
@@ -11,7 +11,8 @@ documentation = "http://dl.ahorn.me/rust-doc/wechatpay/wechatpay/"
 [dependencies]
 time = "0.1"
 uuid = {version="0.2", features=["v4"]}
+md5 = "0.2.0"
 xml-rs = "0.3.4"
 url = "1.2.0"
-# hyper = "0.9.10"
-md5 = "0.2.0"
+hyper = "0.9.10"
+curl = "0.3.2"
