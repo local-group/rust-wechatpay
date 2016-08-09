@@ -51,9 +51,9 @@ pub enum BankType {}
 /// 交易金额默认为人民币交易，接口中参数支付金额单位为【分】，参数值不能带小数。
 /// 对账单中的交易金额单位为【元】。
 /// 外币交易的支付金额精确到币种的最小单位，参数值不能带小数点。
-pub fn get_trade_amount(v: f32) -> usize {
+pub fn get_trade_amount(v: f32) -> u32 {
     // FIXME:: 不同情况下的金额处理
-    (v * 100.0).round() as usize
+    (v * 100.0).round() as u32
 }
 
 /// [时间]
@@ -273,6 +273,15 @@ mod tests {
 
         check_xml_str(&pairs, output);
         check_xml_str(&pairs, &(::to_xml_str(&pairs)));
+    }
+
+
+    #[test]
+    fn test_trade_amount() {
+        assert_eq!(::get_trade_amount(0.99), 99_u32);
+        assert_eq!(::get_trade_amount(0.999), 100_u32);
+        assert_eq!(::get_trade_amount(3.3), 330_u32);
+        assert_eq!(::get_trade_amount(20_f32), 2000_u32);
     }
 
     #[test]
