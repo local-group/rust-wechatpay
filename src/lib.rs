@@ -7,7 +7,7 @@ extern crate xml;
 
 
 use std::string::ToString;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use url::form_urlencoded;
 use xml::writer::{events};
@@ -96,9 +96,9 @@ pub fn get_order_no() -> String {
 /// 签名算法 (给请求参数签名)
 ///
 /// 详见: 接口规则 > 安全规范
-pub fn sign(pairs: &HashMap<String, String>) -> String {
+pub fn sign(pairs: &BTreeMap<String, String>) -> String {
     // 如果参数的值为空不参与签名；
-    let mut keys = pairs
+    let keys = pairs
         .iter()
         .filter(|pair| {
             pair.0.ne("key") && pair.0.ne("sign") && pair.1.len() > (0 as usize)
@@ -107,7 +107,6 @@ pub fn sign(pairs: &HashMap<String, String>) -> String {
         .collect::<Vec<String>>();
 
     // 参数名ASCII码从小到大排序（字典序）；
-    keys.sort();
     let mut encoder = form_urlencoded::Serializer::new(String::new());
     for key in keys {
         encoder.append_pair(&key, &pairs[&key]);
@@ -125,9 +124,9 @@ pub fn sign(pairs: &HashMap<String, String>) -> String {
     digest
 }
 
-/// 将`xml`数据解析成`HashMap`
-pub fn from_xml_str(data: &str) -> HashMap<String, String> {
-    let mut pairs = HashMap::new();
+/// 将`xml`数据解析成`BTreeMap`
+pub fn from_xml_str(data: &str) -> BTreeMap<String, String> {
+    let mut pairs = BTreeMap::new();
 
     let reader = xml::reader::EventReader::from_str(data);
     let mut tag: String = "".to_string();
@@ -149,8 +148,8 @@ pub fn from_xml_str(data: &str) -> HashMap<String, String> {
     pairs
 }
 
-/// 使用`HashMap`生成`xml`数据
-pub fn to_xml_str(pairs: &HashMap<String, String>) -> String {
+/// 使用`BTreeMap`生成`xml`数据
+pub fn to_xml_str(pairs: &BTreeMap<String, String>) -> String {
     let mut target: Vec<u8> = Vec::new();
     {
         let mut writer = xml::writer::EmitterConfig::new()
@@ -173,7 +172,7 @@ mod tests {
     extern crate time;
     extern crate xml;
 
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use xml::reader::{EventReader, XmlEvent};
 
@@ -218,7 +217,7 @@ mod tests {
         }
     }
 
-    fn check_xml_str(pairs: &HashMap<String, String>, data: &str) {
+    fn check_xml_str(pairs: &BTreeMap<String, String>, data: &str) {
         let reader = EventReader::from_str(data);
         let mut tag: String = "".to_string();
         for event in reader {
@@ -254,7 +253,7 @@ mod tests {
    <sign>0CB01533B8C1EF103065174F50BCA001</sign>
 </xml>
 "#;
-        let mut pairs = HashMap::new();
+        let mut pairs = BTreeMap::new();
         for &(k, v) in [
             ("appid"            , "wx2421b1c4370ec43b"),
             ("attach"           , "支付测试"),
@@ -293,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_sign() {
-        let mut pairs = HashMap::new();
+        let mut pairs = BTreeMap::new();
         for &(k, v) in [
             ("appid"       , "wxd930ea5d5a258f4f"),
             ("mch_id"      , "10000100"),
