@@ -101,7 +101,7 @@ pub fn sign(pairs: &BTreeMap<String, String>) -> String {
     let keys = pairs
         .iter()
         .filter(|pair| {
-            pair.0.ne("key") && pair.0.ne("sign") && pair.1.len() > (0 as usize)
+            pair.0.ne("key") && pair.0.ne("sign") && !pair.1.is_empty()
         })
         .map(|pair| {pair.0.to_string()})
         .collect::<Vec<String>>();
