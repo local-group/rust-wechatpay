@@ -20,12 +20,12 @@ use uuid::Uuid;
 
 
 /// 货币种类: 人民币
-pub const CURRENCY_CNY: &'static str = "CNY";
+const _CURRENCY_CNY: &'static str = "CNY";
 /// 统一下单 URL
-pub const UNIFIEDORDER_URL: &'static str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
-pub const MICROPAY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/micropay";
+const UNIFIEDORDER_URL: &'static str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
+const MICROPAY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/micropay";
 /// 查询订单 URL
-pub const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
+const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
 
 
 impl ToString for TradeType {
@@ -43,8 +43,8 @@ impl ToString for TradeType {
 pub enum BankType {}
 
 enum ParamsCheckType {
-    Missing,
-    Redundant
+    Required,
+    Forbidden
 }
 
 /// 错误类
@@ -58,14 +58,17 @@ pub enum WechatpayError {
     Unknown
 }
 
+/// 订单标识
 pub enum OrderIdentifier {
     TransactionId(String),
     OutTradeNo(String)
 }
 
+/// API 请求结果
 pub type WechatpayResult = Result<BTreeMap<String, String>, WechatpayError>;
 
 
+/// API Client
 pub struct WechatpayClient {
     appid: String,
     mch_id: String,
@@ -91,12 +94,12 @@ impl WechatpayClient {
                     check_type: ParamsCheckType) -> Option<WechatpayError> {
         for key in keys.iter() {
             match check_type {
-                ParamsCheckType::Missing => {
+                ParamsCheckType::Required => {
                     if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
                         return Some(WechatpayError::MissingField(key.to_string()));
                     }
                 }
-                ParamsCheckType::Redundant => {
+                ParamsCheckType::Forbidden => {
                     if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
                         return Some(WechatpayError::RedundantField(key.to_string()));
                     }
@@ -172,34 +175,34 @@ impl WechatpayClient {
                trade_type: TradeType,
                retries: Option<u32>) -> WechatpayResult {
         if let Some(e) = self.check_params(&params, vec!["key", "sign"],
-                                           ParamsCheckType::Redundant) {
+                                           ParamsCheckType::Forbidden) {
             return Err(e);
         }
         if let Some(e) = self.check_params(&params,
                                            vec!["body", "out_trade_no", "total_fee", "spbill_create_ip"],
-                                           ParamsCheckType::Missing) {
+                                           ParamsCheckType::Required) {
             return Err(e);
         }
         match trade_type {
             TradeType::Native => {
-                if let Some(e) = self.check_params(&params, vec!["product_id"], ParamsCheckType::Missing) {
+                if let Some(e) = self.check_params(&params, vec!["product_id"], ParamsCheckType::Required) {
                     return Err(e);
                 }
             }
             TradeType::Jsapi => {
-                if let Some(e) = self.check_params(&params, vec!["openid"], ParamsCheckType::Missing) {
+                if let Some(e) = self.check_params(&params, vec!["openid"], ParamsCheckType::Required) {
                     return Err(e);
                 }
             }
             TradeType::Micro => {
-                if let Some(e) = self.check_params(&params, vec!["auth_code"], ParamsCheckType::Missing) {
+                if let Some(e) = self.check_params(&params, vec!["auth_code"], ParamsCheckType::Required) {
                     return Err(e);
                 }
             }
             _ => {}
         }
 
-        let url = if trade_type == TradeType::Micro { UNIFIEDORDER_URL } else { MICROPAY_URL };
+        let url = if trade_type == TradeType::Micro { MICROPAY_URL } else { UNIFIEDORDER_URL };
         let body = params.get("body").unwrap_or(&"Test Request".to_string()).to_string();
         let mut params = params;
         params.insert("trade_type".to_string(), trade_type.to_string());

@@ -1,6 +1,6 @@
 [package]
 name = "wechatpay"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Qian Linfeng <thewawar@gmail.com>"]
 license = "MIT"
 description = "Wechat payment server SDK"
