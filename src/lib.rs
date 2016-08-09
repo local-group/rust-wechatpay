@@ -275,7 +275,6 @@ mod tests {
         check_xml_str(&pairs, &(::to_xml_str(&pairs)));
     }
 
-
     #[test]
     fn test_trade_amount() {
         assert_eq!(::get_trade_amount(0.99), 99_u32);
