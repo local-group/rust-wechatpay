@@ -1,12 +1,11 @@
 [package]
 name = "wechatpay"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Qian Linfeng <thewawar@gmail.com>"]
 license = "MIT"
 description = "Wechat payment server SDK"
 keywords = ["wechat", "pay", "sdk", "wechatpay"]
 repository = "https://github.com/local-group/rust-wechatpay"
-documentation = "http://dl.ahorn.me/rust-doc/wechatpay/wechatpay/"
 
 [dependencies]
 time = "0.1"
