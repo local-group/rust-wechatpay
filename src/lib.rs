@@ -16,12 +16,12 @@ use uuid::Uuid;
 use xml::writer::events;
 
 /// 货币种类: 人民币
-const _CURRENCY_CNY: &'static str = "CNY";
+const _CURRENCY_CNY: &str = "CNY";
 /// 统一下单 URL
-const UNIFIEDORDER_URL: &'static str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
-const MICROPAY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/micropay";
+const UNIFIEDORDER_URL: &str = "https://api.mch.weixin.qq.com/pay/unifiedorder";
+const MICROPAY_URL: &str = "https://api.mch.weixin.qq.com/pay/micropay";
 /// 查询订单 URL
-const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
+const ORDERQUERY_URL: &str = "https://api.mch.weixin.qq.com/pay/orderquery";
 
 impl ToString for TradeType {
     fn to_string(&self) -> String {
@@ -336,7 +336,7 @@ pub fn get_order_no() -> String {
 /// 签名算法 (给请求参数签名)
 ///
 /// 详见: 接口规则 > 安全规范
-pub fn get_sign(pairs: &BTreeMap<String, String>, api_key: &String) -> String {
+pub fn get_sign(pairs: &BTreeMap<String, String>, api_key: &str) -> String {
     // 如果参数的值为空不参与签名；
     let keys = pairs
         .iter()
@@ -399,7 +399,7 @@ pub fn to_xml_str(pairs: &BTreeMap<String, String>) -> String {
             let _ = writer
                 .write::<events::XmlEvent>(events::XmlEvent::start_element(key.as_ref()).into());
             let _ = writer
-                .write::<events::XmlEvent>(events::XmlEvent::characters(value.as_ref()).into());
+                .write::<events::XmlEvent>(events::XmlEvent::characters(value.as_ref()));
             let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
         }
         let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
