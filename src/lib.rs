@@ -54,6 +54,12 @@ pub enum WechatpayError {
     Unknown,
 }
 
+impl From<curl::Error> for WechatpayError {
+    fn from(err: curl::Error) -> WechatpayError {
+        WechatpayError::Curl(err)
+    }
+}
+
 /// 订单标识
 pub enum OrderIdentifier {
     TransactionId(String),
@@ -94,7 +100,7 @@ impl WechatpayClient {
         params: &BTreeMap<String, String>,
         keys: Vec<&str>,
         check_type: ParamsCheckType,
-    ) -> Option<WechatpayError> {
+    ) -> Result<(), WechatpayError> {
         for key in keys.iter() {
             match check_type {
                 ParamsCheckType::Required => {
@@ -103,7 +109,7 @@ impl WechatpayClient {
                         .unwrap_or(&"".to_string())
                         .is_empty()
                     {
-                        return Some(WechatpayError::MissingField(key.to_string()));
+                        return Err(WechatpayError::MissingField(key.to_string()));
                     }
                 }
                 ParamsCheckType::Forbidden => {
@@ -112,12 +118,12 @@ impl WechatpayClient {
                         .unwrap_or(&"".to_string())
                         .is_empty()
                     {
-                        return Some(WechatpayError::RedundantField(key.to_string()));
+                        return Err(WechatpayError::RedundantField(key.to_string()));
                     }
                 }
             }
         }
-        None
+        Ok(())
     }
 
     fn request(
@@ -134,44 +140,30 @@ impl WechatpayClient {
 
         let xml_str = to_xml_str(&params);
         let mut handle = Easy::new();
-        let mut err = WechatpayError::Request;
-        let _ = handle.url(url).map_err(|e| {
-            err = WechatpayError::Curl(e);
-        });
+        handle.url(url)?;
         if require_cert {
-            let _ = handle.ssl_cert(&self.cert).map_err(|e| {
-                err = WechatpayError::Curl(e);
-            });
+            handle.ssl_cert(&self.cert)?;
         }
-        let _ = handle
-            .read_function(move |buf| Ok(xml_str.as_bytes().read(buf).unwrap_or(0)))
-            .map_err(|e| {
-                err = WechatpayError::Curl(e);
-            });
+        handle.read_function(move |buf| Ok(xml_str.as_bytes().read(buf).unwrap_or(0)))?;
 
+        let mut err = WechatpayError::Request;
         for _ in 0..retries.unwrap_or(1) {
             let mut data = Vec::<u8>::new();
             {
                 let mut handle = handle.transfer();
-                let _ = handle
-                    .write_function(|text| {
-                        Ok(match data.write_all(text) {
-                            Ok(_) => text.len(),
-                            Err(_) => 0,
-                        })
+                handle.write_function(|text| {
+                    Ok(match data.write_all(text) {
+                        Ok(_) => text.len(),
+                        Err(_) => 0,
                     })
-                    .map_err(|e| {
-                        err = WechatpayError::Curl(e);
-                    });
-                let _ = handle.perform().map_err(|e| {
-                    err = WechatpayError::Curl(e);
-                });
+                })?;
+                handle.perform()?;
             }
 
             let status_code = match handle.response_code() {
                 Ok(code) => code,
                 Err(e) => {
-                    err = WechatpayError::Curl(e);
+                    err = WechatpayError::from(e);
                     0
                 }
             };
@@ -190,38 +182,21 @@ impl WechatpayClient {
         trade_type: TradeType,
         retries: Option<u32>,
     ) -> WechatpayResult {
-        if let Some(e) = self.check_params(&params, vec!["key", "sign"], ParamsCheckType::Forbidden)
-        {
-            return Err(e);
-        }
-        if let Some(e) = self.check_params(
+        self.check_params(&params, vec!["key", "sign"], ParamsCheckType::Forbidden)?;
+        self.check_params(
             &params,
             vec!["body", "out_trade_no", "total_fee", "spbill_create_ip"],
             ParamsCheckType::Required,
-        ) {
-            return Err(e);
-        }
+        )?;
         match trade_type {
             TradeType::Native => {
-                if let Some(e) =
-                    self.check_params(&params, vec!["product_id"], ParamsCheckType::Required)
-                {
-                    return Err(e);
-                }
+                self.check_params(&params, vec!["product_id"], ParamsCheckType::Required)?;
             }
             TradeType::Jsapi => {
-                if let Some(e) =
-                    self.check_params(&params, vec!["openid"], ParamsCheckType::Required)
-                {
-                    return Err(e);
-                }
+                self.check_params(&params, vec!["openid"], ParamsCheckType::Required)?;
             }
             TradeType::Micro => {
-                if let Some(e) =
-                    self.check_params(&params, vec!["auth_code"], ParamsCheckType::Required)
-                {
-                    return Err(e);
-                }
+                self.check_params(&params, vec!["auth_code"], ParamsCheckType::Required)?;
             }
             _ => {}
         }
