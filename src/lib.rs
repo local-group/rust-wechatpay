@@ -1,22 +1,19 @@
-
 extern crate curl;
-extern crate time;
-extern crate uuid;
-extern crate url;
 extern crate md5;
+extern crate time;
+extern crate url;
+extern crate uuid;
 extern crate xml;
 
-
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::string::ToString;
-use std::collections::BTreeMap;
 
 use curl::easy::Easy;
+use time::strftime;
 use url::form_urlencoded;
-use xml::writer::{events};
-use time::{strftime};
 use uuid::Uuid;
-
+use xml::writer::events;
 
 /// 货币种类: 人民币
 const _CURRENCY_CNY: &'static str = "CNY";
@@ -26,15 +23,15 @@ const MICROPAY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/micropay";
 /// 查询订单 URL
 const ORDERQUERY_URL: &'static str = "https://api.mch.weixin.qq.com/pay/orderquery";
 
-
 impl ToString for TradeType {
     fn to_string(&self) -> String {
         (match *self {
             TradeType::Micro => "MICRO",
             TradeType::Jsapi => "JSAPI",
             TradeType::Native | TradeType::Qrcode => "NATIVE",
-            TradeType::App => "APP"
-        }).to_string()
+            TradeType::App => "APP",
+        })
+        .to_string()
     }
 }
 
@@ -43,7 +40,7 @@ pub enum BankType {}
 
 enum ParamsCheckType {
     Required,
-    Forbidden
+    Forbidden,
 }
 
 /// 错误类
@@ -54,18 +51,17 @@ pub enum WechatpayError {
     RedundantField(String),
     Curl(curl::Error),
     Request,
-    Unknown
+    Unknown,
 }
 
 /// 订单标识
 pub enum OrderIdentifier {
     TransactionId(String),
-    OutTradeNo(String)
+    OutTradeNo(String),
 }
 
 /// API 请求结果
 pub type WechatpayResult = Result<BTreeMap<String, String>, WechatpayError>;
-
 
 /// API Client
 pub struct WechatpayClient {
@@ -77,29 +73,45 @@ pub struct WechatpayClient {
 }
 
 impl WechatpayClient {
-    pub fn new(appid: &str, mch_id: &str, api_key: &str, notify_url: &str, cert: &str) -> WechatpayClient {
-        WechatpayClient{
+    pub fn new(
+        appid: &str,
+        mch_id: &str,
+        api_key: &str,
+        notify_url: &str,
+        cert: &str,
+    ) -> WechatpayClient {
+        WechatpayClient {
             appid: appid.to_string(),
             mch_id: mch_id.to_string(),
             api_key: api_key.to_string(),
             notify_url: notify_url.to_string(),
-            cert: cert.to_string()
+            cert: cert.to_string(),
         }
     }
 
-    fn check_params(&self,
-                    params: &BTreeMap<String, String>,
-                    keys: Vec<&str>,
-                    check_type: ParamsCheckType) -> Option<WechatpayError> {
+    fn check_params(
+        &self,
+        params: &BTreeMap<String, String>,
+        keys: Vec<&str>,
+        check_type: ParamsCheckType,
+    ) -> Option<WechatpayError> {
         for key in keys.iter() {
             match check_type {
                 ParamsCheckType::Required => {
-                    if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
+                    if params
+                        .get(&key.to_string())
+                        .unwrap_or(&"".to_string())
+                        .is_empty()
+                    {
                         return Some(WechatpayError::MissingField(key.to_string()));
                     }
                 }
                 ParamsCheckType::Forbidden => {
-                    if params.get(&key.to_string()).unwrap_or(&"".to_string()).is_empty() {
+                    if params
+                        .get(&key.to_string())
+                        .unwrap_or(&"".to_string())
+                        .is_empty()
+                    {
                         return Some(WechatpayError::RedundantField(key.to_string()));
                     }
                 }
@@ -108,12 +120,13 @@ impl WechatpayClient {
         None
     }
 
-    fn request(&self,
-               url: &str,
-               params: BTreeMap<String, String>,
-               retries: Option<u32>,
-               require_cert: bool) -> WechatpayResult {
-
+    fn request(
+        &self,
+        url: &str,
+        params: BTreeMap<String, String>,
+        retries: Option<u32>,
+        require_cert: bool,
+    ) -> WechatpayResult {
         let api_key = self.api_key.to_string();
         let sign_str = get_sign(&params, &api_key);
         let mut params = params;
@@ -130,25 +143,27 @@ impl WechatpayClient {
                 err = WechatpayError::Curl(e);
             });
         }
-        let _ = handle.read_function(move |buf| {
-            Ok(xml_str.as_bytes().read(buf).unwrap_or(0))
-        }).map_err(|e| {
-            err = WechatpayError::Curl(e);
-        });
+        let _ = handle
+            .read_function(move |buf| Ok(xml_str.as_bytes().read(buf).unwrap_or(0)))
+            .map_err(|e| {
+                err = WechatpayError::Curl(e);
+            });
 
         for _ in 0..retries.unwrap_or(1) {
             let mut data = Vec::<u8>::new();
             {
                 let mut handle = handle.transfer();
-                let _ = handle.write_function(|text| {
-                    Ok(match data.write_all(text) {
-                        Ok(_) => text.len(),
-                        Err(_) => 0
+                let _ = handle
+                    .write_function(|text| {
+                        Ok(match data.write_all(text) {
+                            Ok(_) => text.len(),
+                            Err(_) => 0,
+                        })
                     })
-                }).map_err(|e| {
-                    err = WechatpayError::Curl(e);
-                });
-                let _ = handle.perform().map_err(|e|{
+                    .map_err(|e| {
+                        err = WechatpayError::Curl(e);
+                    });
+                let _ = handle.perform().map_err(|e| {
                     err = WechatpayError::Curl(e);
                 });
             }
@@ -162,47 +177,64 @@ impl WechatpayClient {
             };
             if status_code == 200 || status_code == 201 {
                 let s = String::from_utf8(data).unwrap();
-                return Ok(from_xml_str(s.as_ref()))
+                return Ok(from_xml_str(s.as_ref()));
             }
         }
         Err(err)
     }
 
     // let retries = if retries == 0 { 3 } else { retries };
-    pub fn pay(&self,
-               params: BTreeMap<String, String>,
-               trade_type: TradeType,
-               retries: Option<u32>) -> WechatpayResult {
-        if let Some(e) = self.check_params(&params, vec!["key", "sign"],
-                                           ParamsCheckType::Forbidden) {
+    pub fn pay(
+        &self,
+        params: BTreeMap<String, String>,
+        trade_type: TradeType,
+        retries: Option<u32>,
+    ) -> WechatpayResult {
+        if let Some(e) = self.check_params(&params, vec!["key", "sign"], ParamsCheckType::Forbidden)
+        {
             return Err(e);
         }
-        if let Some(e) = self.check_params(&params,
-                                           vec!["body", "out_trade_no", "total_fee", "spbill_create_ip"],
-                                           ParamsCheckType::Required) {
+        if let Some(e) = self.check_params(
+            &params,
+            vec!["body", "out_trade_no", "total_fee", "spbill_create_ip"],
+            ParamsCheckType::Required,
+        ) {
             return Err(e);
         }
         match trade_type {
             TradeType::Native => {
-                if let Some(e) = self.check_params(&params, vec!["product_id"], ParamsCheckType::Required) {
+                if let Some(e) =
+                    self.check_params(&params, vec!["product_id"], ParamsCheckType::Required)
+                {
                     return Err(e);
                 }
             }
             TradeType::Jsapi => {
-                if let Some(e) = self.check_params(&params, vec!["openid"], ParamsCheckType::Required) {
+                if let Some(e) =
+                    self.check_params(&params, vec!["openid"], ParamsCheckType::Required)
+                {
                     return Err(e);
                 }
             }
             TradeType::Micro => {
-                if let Some(e) = self.check_params(&params, vec!["auth_code"], ParamsCheckType::Required) {
+                if let Some(e) =
+                    self.check_params(&params, vec!["auth_code"], ParamsCheckType::Required)
+                {
                     return Err(e);
                 }
             }
             _ => {}
         }
 
-        let url = if trade_type == TradeType::Micro { MICROPAY_URL } else { UNIFIEDORDER_URL };
-        let body = params.get("body").unwrap_or(&"Test Request".to_string()).to_string();
+        let url = if trade_type == TradeType::Micro {
+            MICROPAY_URL
+        } else {
+            UNIFIEDORDER_URL
+        };
+        let body = params
+            .get("body")
+            .unwrap_or(&"Test Request".to_string())
+            .to_string();
         let mut params = params;
         params.insert("trade_type".to_string(), trade_type.to_string());
         params.insert("appid".to_string(), self.appid.clone());
@@ -215,27 +247,35 @@ impl WechatpayClient {
         self.request(url, params, retries, false)
     }
 
-    pub fn micro_pay(&self,
-                   params: BTreeMap<String, String>,
-                   retries: Option<u32>) -> WechatpayResult {
+    pub fn micro_pay(
+        &self,
+        params: BTreeMap<String, String>,
+        retries: Option<u32>,
+    ) -> WechatpayResult {
         self.pay(params, TradeType::Micro, retries)
     }
 
-    pub fn jsapi_pay(&self,
-                   params: BTreeMap<String, String>,
-                   retries: Option<u32>) -> WechatpayResult {
+    pub fn jsapi_pay(
+        &self,
+        params: BTreeMap<String, String>,
+        retries: Option<u32>,
+    ) -> WechatpayResult {
         self.pay(params, TradeType::Jsapi, retries)
     }
 
-    pub fn qrcode_pay(&self,
-                   params: BTreeMap<String, String>,
-                   retries: Option<u32>) -> WechatpayResult {
+    pub fn qrcode_pay(
+        &self,
+        params: BTreeMap<String, String>,
+        retries: Option<u32>,
+    ) -> WechatpayResult {
         self.pay(params, TradeType::Qrcode, retries)
     }
 
-    pub fn app_pay(&self,
-                   params: BTreeMap<String, String>,
-                   retries: Option<u32>) -> WechatpayResult {
+    pub fn app_pay(
+        &self,
+        params: BTreeMap<String, String>,
+        retries: Option<u32>,
+    ) -> WechatpayResult {
         self.pay(params, TradeType::App, retries)
     }
 
@@ -265,9 +305,10 @@ pub enum TradeType {
     /// `JSAPI`
     Jsapi,
     /// `NATIVE`
-    Native, Qrcode,
+    Native,
+    Qrcode,
     /// `APP` : app支付，统一下单接口trade_type的传参可参考这里
-    App
+    App,
 }
 
 /// [交易金额]
@@ -324,10 +365,8 @@ pub fn get_sign(pairs: &BTreeMap<String, String>, api_key: &String) -> String {
     // 如果参数的值为空不参与签名；
     let keys = pairs
         .iter()
-        .filter(|pair| {
-            pair.0.ne("key") && pair.0.ne("sign") && !pair.1.is_empty()
-        })
-        .map(|pair| {pair.0.to_string()})
+        .filter(|pair| pair.0.ne("key") && pair.0.ne("sign") && !pair.1.is_empty())
+        .map(|pair| pair.0.to_string())
         .collect::<Vec<String>>();
 
     // 参数名ASCII码从小到大排序（字典序）；
@@ -357,7 +396,7 @@ pub fn from_xml_str(data: &str) -> BTreeMap<String, String> {
     let mut tag: String = "".to_string();
     for event in reader {
         match event {
-            Ok(xml::reader::XmlEvent::StartElement{name, ..}) => {
+            Ok(xml::reader::XmlEvent::StartElement { name, .. }) => {
                 tag = name.local_name;
             }
             Ok(xml::reader::XmlEvent::CData(value)) => {
@@ -381,16 +420,17 @@ pub fn to_xml_str(pairs: &BTreeMap<String, String>) -> String {
             .write_document_declaration(false)
             .create_writer(&mut target);
         let _ = writer.write::<events::XmlEvent>(events::XmlEvent::start_element("xml").into());
-        for (key, value) in pairs{
-            let _ = writer.write::<events::XmlEvent>(events::XmlEvent::start_element(key.as_ref()).into());
-            let _ = writer.write::<events::XmlEvent>(events::XmlEvent::characters(value.as_ref()).into());
+        for (key, value) in pairs {
+            let _ = writer
+                .write::<events::XmlEvent>(events::XmlEvent::start_element(key.as_ref()).into());
+            let _ = writer
+                .write::<events::XmlEvent>(events::XmlEvent::characters(value.as_ref()).into());
             let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
         }
         let _ = writer.write::<events::XmlEvent>(events::XmlEvent::end_element().into());
     }
     String::from_utf8(target).unwrap()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -428,16 +468,18 @@ mod tests {
 "#;
         let pairs = ::from_xml_str(source);
         for &(k, v) in [
-            ("return_code"    , "SUCCESS"),
-            ("return_msg"     , "OK"),
-            ("appid"          , "wx2421b1c4370ec43b"),
-            ("mch_id"         , "10000100"),
-            ("result_code"    , "SUCCESS"),
-            ("attach"         , "订单额外描述"),
-            ("transaction_id" , "1008450740201411110005820873"),
-            ("time_end"       , "20141111170043"),
-            ("trade_type"     , "APP")
-        ].iter() {
+            ("return_code", "SUCCESS"),
+            ("return_msg", "OK"),
+            ("appid", "wx2421b1c4370ec43b"),
+            ("mch_id", "10000100"),
+            ("result_code", "SUCCESS"),
+            ("attach", "订单额外描述"),
+            ("transaction_id", "1008450740201411110005820873"),
+            ("time_end", "20141111170043"),
+            ("trade_type", "APP"),
+        ]
+        .iter()
+        {
             assert_eq!(pairs.get(k), Some(&v.to_string()));
         }
     }
@@ -447,7 +489,7 @@ mod tests {
         let mut tag: String = "".to_string();
         for event in reader {
             match event {
-                Ok(XmlEvent::StartElement{name, ..}) => {
+                Ok(XmlEvent::StartElement { name, .. }) => {
                     tag = name.local_name;
                 }
                 Ok(XmlEvent::Characters(s)) => {
@@ -480,18 +522,23 @@ mod tests {
 "#;
         let mut pairs = BTreeMap::new();
         for &(k, v) in [
-            ("appid"            , "wx2421b1c4370ec43b"),
-            ("attach"           , "支付测试"),
-            ("body"             , "APP支付测试"),
-            ("mch_id"           , "10000100"),
-            ("nonce_str"        , "1add1a30ac87aa2db72f57a2375d8fec"),
-            ("notify_url"       , "http://wxpay.weixin.qq.com/pub_v2/pay/notify.v2.php"),
-            ("out_trade_no"     , "1415659990"),
-            ("spbill_create_ip" , "14.23.150.211"),
-            ("total_fee"        , "1"),
-            ("trade_type"       , "APP"),
-            ("sign"             , "0CB01533B8C1EF103065174F50BCA001")
-        ].iter() {
+            ("appid", "wx2421b1c4370ec43b"),
+            ("attach", "支付测试"),
+            ("body", "APP支付测试"),
+            ("mch_id", "10000100"),
+            ("nonce_str", "1add1a30ac87aa2db72f57a2375d8fec"),
+            (
+                "notify_url",
+                "http://wxpay.weixin.qq.com/pub_v2/pay/notify.v2.php",
+            ),
+            ("out_trade_no", "1415659990"),
+            ("spbill_create_ip", "14.23.150.211"),
+            ("total_fee", "1"),
+            ("trade_type", "APP"),
+            ("sign", "0CB01533B8C1EF103065174F50BCA001"),
+        ]
+        .iter()
+        {
             pairs.insert(k.to_string(), v.to_string());
         }
 
@@ -519,15 +566,20 @@ mod tests {
     fn test_sign() {
         let mut pairs = BTreeMap::new();
         for &(k, v) in [
-            ("appid"       , "wxd930ea5d5a258f4f"),
-            ("mch_id"      , "10000100"),
-            ("device_info" , "1000"),
-            ("body"        , "test"),
-            ("nonce_str"   , "ibuaiVcKdpRxkhJA")
-        ].iter() {
+            ("appid", "wxd930ea5d5a258f4f"),
+            ("mch_id", "10000100"),
+            ("device_info", "1000"),
+            ("body", "test"),
+            ("nonce_str", "ibuaiVcKdpRxkhJA"),
+        ]
+        .iter()
+        {
             pairs.insert(k.to_string(), v.to_string());
         }
         let api_key = "192006250b4c09247ec02edce69f6a2d".to_string();
-        assert_eq!(::get_sign(&pairs, &api_key), "9A0A8659F005D6984697E2CA0A9CF3B7");
+        assert_eq!(
+            ::get_sign(&pairs, &api_key),
+            "9A0A8659F005D6984697E2CA0A9CF3B7"
+        );
     }
 }
